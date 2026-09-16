@@ -1,0 +1,532 @@
+import pandas as pd
+import ast
+import requests
+import json
+import socket
+import urllib3.util.connection as urllib3_connection
+import streamlit as st
+
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+urllib3_connection.allowed_gai_family = lambda: socket.AF_INET
+
+
+# TMDB API key
+TMDB_API_KEY = st.secrets["TMDB_API_KEY"]
+
+
+# Load data
+movies = pd.read_csv("data/movies.csv")
+credits = pd.read_csv("data/credits.csv")
+
+
+# Convert genres and keywords
+def convert(text):
+    L = []
+
+    for i in ast.literal_eval(text):
+        L.append(i["name"])
+
+    return L
+
+
+movies["genres"] = movies["genres"].apply(convert)
+movies["keywords"] = movies["keywords"].apply(convert)
+
+
+# Convert cast
+def convert_cast(text):
+    L = []
+
+    for i in ast.literal_eval(text):
+        L.append(i["name"])
+
+    return L[:3]
+
+
+credits["cast"] = credits["cast"].apply(convert_cast)
+
+
+# Handle missing overview
+movies["overview"] = movies["overview"].fillna("")
+
+
+# Merge datasets
+movies = movies.merge(
+    credits,
+    left_on="id",
+    right_on="movie_id"
+)
+
+
+# Keep required columns
+movies = movies[
+    ["movie_id", "title_x", "overview", "genres", "keywords", "cast"]
+]
+
+
+movies = movies.rename(
+    columns={"title_x": "title"}
+)
+
+
+# Create tags
+movies["tags"] = (
+    movies["overview"]
+    + movies["genres"].apply(lambda x: " ".join(x))
+    + movies["keywords"].apply(lambda x: " ".join(x))
+    + movies["cast"].apply(lambda x: " ".join(x))
+)
+
+
+movies["tags"] = movies["tags"].apply(
+    lambda x: x.lower()
+)
+
+
+# Vectorization
+cv = CountVectorizer(
+    max_features=5000,
+    stop_words="english"
+)
+
+vectors = cv.fit_transform(
+    movies["tags"]
+).toarray()
+
+
+# Similarity matrix
+similarity = cosine_similarity(vectors)
+
+
+# TMDB session with retry
+tmdb_session = requests.Session()
+
+retry_strategy = Retry(
+    total=5,
+    connect=5,
+    read=5,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"]
+)
+
+adapter = HTTPAdapter(max_retries=retry_strategy)
+
+tmdb_session.mount("https://", adapter)
+
+tmdb_session.headers.update({
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
+})
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_poster(movie_title):
+
+    movie_title = movie_title.strip()
+
+    search_title = movie_title
+
+    if movie_title == "Alien³":
+        search_title = "Alien 3"
+
+    url = "https://api.themoviedb.org/3/search/movie"
+
+    params = {
+        "api_key": TMDB_API_KEY,
+        "query": search_title
+    }
+
+    try:
+        response = tmdb_session.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        results = data.get("results", [])
+
+        # Exact title match first
+        for result in results:
+
+            title = result.get("title", "").strip().lower()
+
+            if title == search_title.lower():
+
+                poster_path = result.get("poster_path")
+
+                if poster_path:
+                    return (
+                        "https://image.tmdb.org/t/p/w500"
+                        + poster_path
+                    )
+
+        # Fallback: first result with poster
+        for result in results:
+
+            poster_path = result.get("poster_path")
+
+            if poster_path:
+                return (
+                    "https://image.tmdb.org/t/p/w500"
+                    + poster_path
+                )
+
+    except requests.exceptions.RequestException:
+        return None
+
+    return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_rating(movie_title):
+
+    movie_title = movie_title.strip()
+
+    search_title = movie_title
+
+    if movie_title == "Alien³":
+        search_title = "Alien 3"
+
+    url = "https://api.themoviedb.org/3/search/movie"
+
+    params = {
+        "api_key": TMDB_API_KEY,
+        "query": search_title
+    }
+
+    try:
+        response = tmdb_session.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        results = data.get("results", [])
+
+        # Exact title match
+        for result in results:
+
+            title = result.get("title", "").strip().lower()
+
+            if title == search_title.lower():
+                return result.get("vote_average")
+
+        # Fallback
+        if results:
+            return results[0].get("vote_average")
+
+    except requests.exceptions.RequestException:
+        return None
+
+    return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_overview(movie_title):
+
+    movie_title = movie_title.strip()
+
+    search_title = movie_title
+
+    if movie_title == "Alien³":
+        search_title = "Alien 3"
+
+    url = "https://api.themoviedb.org/3/search/movie"
+
+    params = {
+        "api_key": TMDB_API_KEY,
+        "query": search_title
+    }
+
+    try:
+        response = tmdb_session.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return ""
+
+        data = response.json()
+        results = data.get("results", [])
+
+        for result in results:
+
+            title = result.get("title", "").strip().lower()
+
+            if title == search_title.lower():
+                return result.get("overview", "")
+
+        if results:
+            return results[0].get("overview", "")
+
+    except requests.exceptions.RequestException:
+        return ""
+
+    return ""
+
+def load_favorites():
+
+    try:
+        with open("favorites.json", "r") as file:
+            return json.load(file)
+
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_favorites(favorites):
+
+    with open("favorites.json", "w") as file:
+        json.dump(
+            favorites,
+            file,
+            indent=4
+        )
+
+# Recommendation function
+def recommend(movie):
+
+    index = movies[
+        movies["title"] == movie
+    ].index[0]
+
+    distances = similarity[index]
+
+    movie_list = sorted(
+        list(enumerate(distances)),
+        reverse=True,
+        key=lambda x: x[1]
+    )[1:6]
+
+    st.subheader("🎬 Recommended Movies")
+
+    cols = st.columns(5)
+
+    for index, i in enumerate(movie_list):
+
+        movie_title = movies.iloc[i[0]].title
+
+        poster = fetch_poster(movie_title)
+
+        rating = fetch_rating(movie_title)
+
+        genres = movies.iloc[i[0]].genres
+
+        overview = fetch_overview(movie_title)
+
+        rating_text = "⭐ N/A"
+
+        if rating is not None:
+            rating_text = f"⭐ {rating:.1f}/10"
+
+        genre_html = ""
+
+        for genre in genres:
+            genre_html += (
+                f"<span class='genre-badge'>{genre}</span>"
+            )
+
+        overview_text = overview
+
+        if len(overview_text) > 120:
+            overview_text = overview_text[:120] + "..."
+
+        with cols[index]:
+
+            if poster:
+                st.image(
+                    poster,
+                    width=150
+                )
+            else:
+                st.write("🖼️ Poster not available")
+
+            fav_key = f"fav_{movie_title}"
+
+            if st.button(
+                "⭐ Favorite",
+                key=fav_key
+            ):
+                if movie_title not in st.session_state.favorites:
+
+                    st.session_state.favorites.append(
+                        movie_title
+                    )
+
+                    save_favorites(
+                        st.session_state.favorites
+                    )
+
+                    st.success(
+                        "Added to favorites!"
+                    )
+
+            st.markdown(
+                f"""
+                <div class='reco-title'>
+                    🎬 {movie_title}
+                    <br>
+                    <span style='color:#fbbf24; font-size:14px;'>
+                        {rating_text}
+                    </span>
+                    <br>
+                    {genre_html}
+                    <p style='
+                        color:#cbd5e1;
+                        font-size:11px;
+                        line-height:1.4;
+                        margin-top:8px;
+                        text-align:left;
+                    '>
+                        {overview_text}
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+st.markdown(
+    """
+    <style>
+    
+    .stApp {
+        background-color: #111827;
+    }
+
+    h1, h2, h3, p, label {
+        color: white !important;
+    }
+
+    .stSelectbox label {
+        color: white !important;
+        font-weight: bold;
+    }
+
+    .stButton > button {
+        width: 100%;
+        border-radius: 10px;
+        font-size: 18px;
+        font-weight: bold;
+        color: #111827 !important;
+        background-color: white !important;
+    }
+
+    .stButton > button p {
+        color: #111827 !important;
+    }
+
+    .stButton > button:hover {
+        color: white !important;
+        background-color: #374151 !important;
+    }
+
+    .stButton > button:hover p {
+        color: white !important;
+    }
+
+    .reco-title {
+    text-align: center;
+    font-weight: bold;
+    color: white !important;
+    margin-top: 8px;
+    min-height: 72px;
+    line-height: 1.4;
+}
+
+.genre-badge {
+    display: inline-block;
+    background-color: #374151;
+    color: #e5e7eb;
+    padding: 4px 8px;
+    margin: 2px;
+    border-radius: 12px;
+    font-size: 11px;
+}
+
+    .stImage img {
+    border-radius: 12px;
+    transition: transform 0.2s ease;
+}
+
+.stImage img:hover {
+    transform: scale(1.05);
+}
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Title
+st.markdown(
+    "<h1 style='text-align: center;'>"
+    "🎬 AI Movie Recommendation System"
+    "</h1>",
+    unsafe_allow_html=True
+)
+
+
+# Description
+st.markdown(
+    "<p style='text-align: center;'>"
+    "Select a movie and get 5 similar movie recommendations."
+    "</p>",
+    unsafe_allow_html=True
+)
+if "favorites" not in st.session_state:
+    st.session_state.favorites = load_favorites()
+
+# Movie selection
+movie_name = st.selectbox(
+    "🎬 Choose a movie:",
+    movies["title"].values
+)
+
+if "show_recommendations" not in st.session_state:
+    st.session_state.show_recommendations = False
+
+
+if st.button("🎯 Recommend Movies"):
+    st.session_state.show_recommendations = True
+
+if st.session_state.show_recommendations:
+    recommend(movie_name)
+
+if st.session_state.favorites:
+
+    st.subheader("⭐ My Favorites")
+
+    for favorite in st.session_state.favorites:
+
+        col1, col2 = st.columns([4, 1])
+
+        with col1:
+            st.write(f"🎬 {favorite}")
+
+        with col2:
+
+            if st.button(
+                "❌",
+                key=f"remove_{favorite}"
+            ):
+                st.session_state.favorites.remove(favorite)
+
+                save_favorites(
+                    st.session_state.favorites
+                )
+
+                st.rerun()
