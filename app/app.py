@@ -124,57 +124,78 @@ tmdb_session.headers.update({
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_poster(movie_title):
+def fetch_poster(movie_id, movie_title):
+    """
+    Fetch a movie poster from TMDB.
 
-    movie_title = movie_title.strip()
+    First tries the exact TMDB movie ID from the dataset.
+    If that does not return a poster, falls back to title search.
+    """
 
+    # 1. Exact TMDB movie ID lookup
+    try:
+        detail_url = f"https://api.themoviedb.org/3/movie/{int(movie_id)}"
+        detail_params = {
+            "api_key": TMDB_API_KEY
+        }
+
+        response = tmdb_session.get(
+            detail_url,
+            params=detail_params,
+            timeout=20
+        )
+
+        if response.status_code == 200:
+            poster_path = response.json().get("poster_path")
+
+            if poster_path:
+                return "https://image.tmdb.org/t/p/w500" + poster_path
+
+    except (requests.exceptions.RequestException, ValueError, TypeError):
+        pass
+
+    # 2. Fallback: title search
+    movie_title = str(movie_title).strip()
     search_title = movie_title
 
     if movie_title == "Alien³":
         search_title = "Alien 3"
 
-    url = "https://api.themoviedb.org/3/search/movie"
-
-    params = {
+    search_url = "https://api.themoviedb.org/3/search/movie"
+    search_params = {
         "api_key": TMDB_API_KEY,
-        "query": search_title
+        "query": search_title,
+        "include_adult": False
     }
 
     try:
         response = tmdb_session.get(
-            url,
-            params=params,
+            search_url,
+            params=search_params,
             timeout=20
         )
 
         if response.status_code != 200:
             return None
 
-        data = response.json()
-        results = data.get("results", [])
+        results = response.json().get("results", [])
 
         # Exact title match first
         for result in results:
-            title = result.get("title", "").strip().lower()
+            result_title = str(result.get("title", "")).strip().lower()
 
-            if title == search_title.lower():
+            if result_title == search_title.lower():
                 poster_path = result.get("poster_path")
 
                 if poster_path:
-                    return (
-                        "https://image.tmdb.org/t/p/w500"
-                        + poster_path
-                    )
+                    return "https://image.tmdb.org/t/p/w500" + poster_path
 
-        # Fallback: first result with poster
+        # Final fallback: first result that actually has a poster
         for result in results:
             poster_path = result.get("poster_path")
 
             if poster_path:
-                return (
-                    "https://image.tmdb.org/t/p/w500"
-                    + poster_path
-                )
+                return "https://image.tmdb.org/t/p/w500" + poster_path
 
     except requests.exceptions.RequestException:
         return None
@@ -431,11 +452,21 @@ def recommend_by_genre(selected_genre):
         movies["genres"].apply(
             lambda genre_list: selected_genre in genre_list
         )
-    ]
+    ].copy()
 
     if matching_movies.empty:
         st.warning(f"No movies found for {selected_genre}.")
         return
+
+    # Prefer movies that are more specific to the selected category.
+    # This reduces repeated titles across categories when a movie
+    # belongs to multiple genres such as Action + Adventure.
+    matching_movies["_genre_count"] = matching_movies["genres"].apply(len)
+
+    matching_movies = matching_movies.sort_values(
+        by=["_genre_count", "title"],
+        ascending=[True, True]
+    )
 
     recommended_movies = matching_movies.head(5)
 
@@ -451,7 +482,7 @@ def recommend_by_genre(selected_genre):
         movie_id = row.movie_id
         genres = row.genres
 
-        poster = fetch_poster(movie_title)
+        poster = fetch_poster(movie_id, movie_title)
         rating = fetch_rating(movie_title)
         overview = fetch_overview(movie_title)
         trailer_key = fetch_trailer(movie_id)
