@@ -19,7 +19,7 @@ The final user-facing application lets a user choose a movie category and receiv
 
 The project is deployed on **Streamlit Community Cloud**.
 
-> Add or update the live application URL here before final submission if required.
+**Live App:** [https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app](https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app)
 
 ---
 
