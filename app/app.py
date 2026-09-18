@@ -68,7 +68,6 @@ movies = movies[
     ["movie_id", "title_x", "overview", "genres", "keywords", "cast"]
 ]
 
-
 movies = movies.rename(
     columns={"title_x": "title"}
 )
@@ -81,7 +80,6 @@ movies["tags"] = (
     + movies["keywords"].apply(lambda x: " ".join(x))
     + movies["cast"].apply(lambda x: " ".join(x))
 )
-
 
 movies["tags"] = movies["tags"].apply(
     lambda x: x.lower()
@@ -157,11 +155,9 @@ def fetch_poster(movie_title):
 
         # Exact title match first
         for result in results:
-
             title = result.get("title", "").strip().lower()
 
             if title == search_title.lower():
-
                 poster_path = result.get("poster_path")
 
                 if poster_path:
@@ -172,7 +168,6 @@ def fetch_poster(movie_title):
 
         # Fallback: first result with poster
         for result in results:
-
             poster_path = result.get("poster_path")
 
             if poster_path:
@@ -185,6 +180,7 @@ def fetch_poster(movie_title):
         return None
 
     return None
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_rating(movie_title):
@@ -218,7 +214,6 @@ def fetch_rating(movie_title):
 
         # Exact title match
         for result in results:
-
             title = result.get("title", "").strip().lower()
 
             if title == search_title.lower():
@@ -232,6 +227,7 @@ def fetch_rating(movie_title):
         return None
 
     return None
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_overview(movie_title):
@@ -264,7 +260,6 @@ def fetch_overview(movie_title):
         results = data.get("results", [])
 
         for result in results:
-
             title = result.get("title", "").strip().lower()
 
             if title == search_title.lower():
@@ -277,6 +272,138 @@ def fetch_overview(movie_title):
         return ""
 
     return ""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_trailer(movie_id):
+    """
+    Return a YouTube video key for the best available trailer.
+    Preference order:
+    1. Official YouTube trailer
+    2. Any YouTube trailer
+    3. Official YouTube teaser
+    4. Any YouTube teaser
+    5. Any YouTube video
+    """
+    url = (
+        f"https://api.themoviedb.org/3/movie/"
+        f"{int(movie_id)}/videos"
+    )
+
+    params = {
+        "api_key": TMDB_API_KEY,
+        "language": "en-US"
+    }
+
+    try:
+        response = tmdb_session.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return None
+
+        videos = response.json().get("results", [])
+
+        youtube_videos = [
+            video
+            for video in videos
+            if video.get("site") == "YouTube"
+            and video.get("key")
+        ]
+
+        for video in youtube_videos:
+            if (
+                video.get("type") == "Trailer"
+                and video.get("official") is True
+            ):
+                return video.get("key")
+
+        for video in youtube_videos:
+            if video.get("type") == "Trailer":
+                return video.get("key")
+
+        for video in youtube_videos:
+            if (
+                video.get("type") == "Teaser"
+                and video.get("official") is True
+            ):
+                return video.get("key")
+
+        for video in youtube_videos:
+            if video.get("type") == "Teaser":
+                return video.get("key")
+
+        if youtube_videos:
+            return youtube_videos[0].get("key")
+
+    except requests.exceptions.RequestException:
+        return None
+
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_watch_providers(movie_id):
+
+    url = (
+        f"https://api.themoviedb.org/3/movie/"
+        f"{int(movie_id)}/watch/providers"
+    )
+
+    params = {
+        "api_key": TMDB_API_KEY
+    }
+
+    try:
+        response = tmdb_session.get(
+            url,
+            params=params,
+            timeout=20
+        )
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+
+        india_data = (
+            data.get("results", {})
+            .get("IN", {})
+        )
+
+        providers = []
+
+        for category in [
+            "flatrate",
+            "free",
+            "ads",
+            "rent",
+            "buy"
+        ]:
+
+            for provider in india_data.get(
+                category,
+                []
+            ):
+
+                provider_name = provider.get(
+                    "provider_name"
+                )
+
+                if (
+                    provider_name
+                    and provider_name not in providers
+                ):
+                    providers.append(provider_name)
+
+        return providers
+
+    except requests.exceptions.RequestException:
+        return []
+
 
 def load_favorites():
 
@@ -297,112 +424,88 @@ def save_favorites(favorites):
             indent=4
         )
 
-# Recommendation function
-def recommend(movie):
 
-    index = movies[
-        movies["title"] == movie
-    ].index[0]
+def recommend_by_genre(selected_genre):
 
-    distances = similarity[index]
+    matching_movies = movies[
+        movies["genres"].apply(
+            lambda genre_list: selected_genre in genre_list
+        )
+    ]
 
-    movie_list = sorted(
-        list(enumerate(distances)),
-        reverse=True,
-        key=lambda x: x[1]
-    )[1:6]
+    if matching_movies.empty:
+        st.warning(f"No movies found for {selected_genre}.")
+        return
 
-    st.subheader("🎬 Recommended Movies")
+    recommended_movies = matching_movies.head(5)
+
+    st.subheader(f"🎬 {selected_genre} Movie Recommendations")
 
     cols = st.columns(5)
 
-    for index, i in enumerate(movie_list):
+    for index, row in enumerate(
+        recommended_movies.itertuples()
+    ):
 
-        movie_title = movies.iloc[i[0]].title
+        movie_title = row.title
+        movie_id = row.movie_id
+        genres = row.genres
 
         poster = fetch_poster(movie_title)
-
         rating = fetch_rating(movie_title)
-
-        genres = movies.iloc[i[0]].genres
-
         overview = fetch_overview(movie_title)
+        trailer_key = fetch_trailer(movie_id)
+        watch_providers = fetch_watch_providers(movie_id)
 
         rating_text = "⭐ N/A"
-
         if rating is not None:
             rating_text = f"⭐ {rating:.1f}/10"
-
-        genre_html = ""
-
-        for genre in genres:
-            genre_html += (
-                f"<span class='genre-badge'>{genre}</span>"
-            )
-
-        overview_text = overview
-
-        if len(overview_text) > 120:
-            overview_text = overview_text[:120] + "..."
 
         with cols[index]:
 
             if poster:
-                st.image(
-                    poster,
-                    width=150
-                )
+                st.image(poster, width=170)
             else:
-                st.write("🖼️ Poster not available")
-
-            fav_key = f"fav_{movie_title}"
+                st.caption("Poster not available")
 
             if st.button(
-                "⭐ Favorite",
-                key=fav_key
+                movie_title,
+                key=f"details_{movie_id}",
+                use_container_width=True
             ):
-                if movie_title not in st.session_state.favorites:
+                st.session_state.selected_movie = {
+                    "title": movie_title,
+                    "movie_id": movie_id,
+                    "poster": poster,
+                    "rating": rating,
+                    "rating_text": rating_text,
+                    "genres": genres,
+                    "overview": overview or "No overview available.",
+                    "trailer_key": trailer_key,
+                    "watch_providers": watch_providers,
+                }
 
-                    st.session_state.favorites.append(
-                        movie_title
-                    )
-
-                    save_favorites(
-                        st.session_state.favorites
-                    )
-
-                    st.success(
-                        "Added to favorites!"
-                    )
+                st.switch_page("pages/movie_details.py")
 
             st.markdown(
                 f"""
-                <div class='reco-title'>
-                    🎬 {movie_title}
-                    <br>
-                    <span style='color:#fbbf24; font-size:14px;'>
-                        {rating_text}
-                    </span>
-                    <br>
-                    {genre_html}
-                    <p style='
-                        color:#cbd5e1;
-                        font-size:11px;
-                        line-height:1.4;
-                        margin-top:8px;
-                        text-align:left;
-                    '>
-                        {overview_text}
-                    </p>
+                <div style="
+                    text-align:center;
+                    color:#fbbf24;
+                    font-size:14px;
+                    font-weight:bold;
+                    margin-top:6px;
+                ">
+                    {rating_text}
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
+
 st.markdown(
     """
     <style>
-    
     .stApp {
         background-color: #111827;
     }
@@ -439,39 +542,38 @@ st.markdown(
     }
 
     .reco-title {
-    text-align: center;
-    font-weight: bold;
-    color: white !important;
-    margin-top: 8px;
-    min-height: 72px;
-    line-height: 1.4;
-}
+        text-align: center;
+        font-weight: bold;
+        color: white !important;
+        margin-top: 8px;
+        min-height: 72px;
+        line-height: 1.4;
+    }
 
-.genre-badge {
-    display: inline-block;
-    background-color: #374151;
-    color: #e5e7eb;
-    padding: 4px 8px;
-    margin: 2px;
-    border-radius: 12px;
-    font-size: 11px;
-}
+    .genre-badge {
+        display: inline-block;
+        background-color: #374151;
+        color: #e5e7eb;
+        padding: 4px 8px;
+        margin: 2px;
+        border-radius: 12px;
+        font-size: 11px;
+    }
 
     .stImage img {
-    border-radius: 12px;
-    transition: transform 0.2s ease;
-}
+        border-radius: 12px;
+        transition: transform 0.2s ease;
+    }
 
-.stImage img:hover {
-    transform: scale(1.05);
-}
-
+    .stImage img:hover {
+        transform: scale(1.05);
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Title
+
 st.markdown(
     "<h1 style='text-align: center;'>"
     "🎬 AI Movie Recommendation System"
@@ -479,32 +581,53 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-# Description
 st.markdown(
     "<p style='text-align: center;'>"
-    "Select a movie and get 5 similar movie recommendations."
+    "Choose a movie type and get 5 recommendations based on your selected category."
     "</p>",
     unsafe_allow_html=True
 )
+
+
 if "favorites" not in st.session_state:
     st.session_state.favorites = load_favorites()
 
-# Movie selection
-movie_name = st.selectbox(
-    "🎬 Choose a movie:",
-    movies["title"].values
+
+genre_options = [
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Drama",
+    "Fantasy",
+    "Horror",
+    "Mystery",
+    "Romance",
+    "Thriller"
+]
+
+selected_genre = st.selectbox(
+    "🎭 What type of movie do you want to watch?",
+    genre_options
 )
+
 
 if "show_recommendations" not in st.session_state:
     st.session_state.show_recommendations = False
 
 
+if "selected_movie" not in st.session_state:
+    st.session_state.selected_movie = None
+
+
 if st.button("🎯 Recommend Movies"):
     st.session_state.show_recommendations = True
+    st.session_state.selected_movie = None
 
 if st.session_state.show_recommendations:
-    recommend(movie_name)
+    recommend_by_genre(selected_genre)
+
 
 if st.session_state.favorites:
 
@@ -523,7 +646,9 @@ if st.session_state.favorites:
                 "❌",
                 key=f"remove_{favorite}"
             ):
-                st.session_state.favorites.remove(favorite)
+                st.session_state.favorites.remove(
+                    favorite
+                )
 
                 save_favorites(
                     st.session_state.favorites
