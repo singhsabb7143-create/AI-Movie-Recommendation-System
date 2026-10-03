@@ -11,3 +11,4 @@ __pycache__/
 movies.pkl
 similarity.pkl
 backup/
+recommendation_history.json
