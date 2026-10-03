@@ -1,0 +1,31 @@
+{
+  "model_type": "CineAI TF-IDF + TruncatedSVD + cosine retrieval",
+  "model_version": 2,
+  "movies_indexed": 4803,
+  "tfidf_features": 35000,
+  "latent_dimensions": 256,
+  "genres_indexed": [
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Family",
+    "Fantasy",
+    "Foreign",
+    "History",
+    "Horror",
+    "Music",
+    "Mystery",
+    "Romance",
+    "Science Fiction",
+    "TV Movie",
+    "Thriller",
+    "War",
+    "Western"
+  ],
+  "training_seconds": 3.76,
+  "total_seconds": 4.84
+}

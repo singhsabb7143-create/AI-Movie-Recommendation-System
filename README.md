@@ -1,8 +1,8 @@
 # 🎬 AI Movie Recommendation System
 
-A category-based movie discovery web application built with **Python, Streamlit, Pandas, scikit-learn, Requests, and the TMDB API**.
+A category-guided movie discovery web application built with **Python, Streamlit, Pandas, scikit-learn, Requests, and the TMDB API**.
 
-The final user-facing application lets a user choose a movie category and receive **5 matching movie recommendations**. Selecting a movie opens a dedicated details page with its poster, rating, genres, overview, trailer, India-region availability information, and persistent Favorites.
+The application uses a **locally trained CineAI recommendation model** to generate movie recommendations. TMDB is used only to enrich the recommended movies with live presentation and media information such as posters, ratings, trailers, and India-region watch-provider data.
 
 ---
 
@@ -19,7 +19,9 @@ The final user-facing application lets a user choose a movie category and receiv
 
 The project is deployed on **Streamlit Community Cloud**.
 
-**Live App:** [https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app](https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app)
+**Live App:** https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app
+
+**GitHub Repository:** https://github.com/singhsabb7143-create/AI-Movie-Recommendation-System
 
 ---
 
@@ -27,22 +29,22 @@ The project is deployed on **Streamlit Community Cloud**.
 
 Movie platforms contain large catalogues, which can make it difficult to decide what to watch.
 
-This project focuses on a simple discovery flow:
+This project provides a simple category-based discovery flow while using a local machine-learning recommendation engine for the core ranking.
 
 ```text
 Select Movie Category
         ↓
-Filter Matching Movies
+CineAI Recommendation Model
         ↓
-Show 5 Recommendations
+Semantic Similarity + Quality + Specificity Scoring
         ↓
-Poster + Movie Name + Rating
+5 Movie Recommendations
         ↓
-Open Movie Details
+TMDB Enrichment
         ↓
-Genres + Overview + Trailer
+Poster + Rating + Movie Details
         ↓
-India Availability + Favorites
+Trailer + India Availability + Favorites
 ```
 
 The main recommendation screen is intentionally concise. Detailed information is shown only after a movie is selected.
@@ -67,21 +69,43 @@ The user can select one of the supported categories:
 - Romance
 - Thriller
 
-The application filters the local movie dataset by the selected genre and displays five matching movies.
+The selected category is passed to the local CineAI recommendation model, which ranks candidate movies and returns five recommendations while avoiding previously recommended movies when history is available.
+
+### 🧠 CineAI Recommendation Model
+
+The core recommendation engine is a **locally trained machine-learning model** stored in:
+
+```text
+models/cineai_model.joblib
+```
+
+The model uses:
+
+- Movie overview/text content
+- Genres and related text features
+- **TF-IDF vectorization**
+- **TruncatedSVD** dimensionality reduction
+- **Cosine similarity / semantic retrieval**
+- Quality and specificity signals for final ranking
+- Diversity-aware selection for recommendations
+
+The current model version is **CineAI V2**.
 
 ### 🖼️ Movie Posters
 
-Posters are retrieved from the TMDB API and displayed on the recommendation cards and movie details page.
+Posters are retrieved from the TMDB API and displayed on recommendation cards and the Movie Details page.
 
 ### ⭐ Movie Ratings
 
-TMDB ratings are fetched and displayed with each recommendation and on the movie details page.
+TMDB ratings are fetched and displayed with recommendations and on the Movie Details page.
 
 ### 📄 Movie Details Page
 
-Clicking a movie title opens:
+Clicking a movie opens the dedicated page:
 
-`app/pages/movie_details.py`
+```text
+app/pages/movie_details.py
+```
 
 The details page provides:
 
@@ -97,13 +121,11 @@ The details page provides:
 
 ### 🎬 Trailer Playback
 
-Trailer/video information is fetched from TMDB.
-
-The application prefers a YouTube trailer and falls back to a suitable YouTube teaser/video when available. The selected video is embedded on the Movie Details page.
+Trailer/video information is fetched from TMDB. The application prefers a suitable YouTube trailer and falls back to another suitable YouTube video when available.
 
 ### 📺 India Availability
 
-The application reads TMDB watch-provider information for the **India (`IN`) region** and displays the provider names returned by the API.
+The application reads TMDB watch-provider information for the **India (`IN`) region** and displays provider names returned by the API.
 
 Availability is title- and region-specific and may change over time.
 
@@ -122,47 +144,76 @@ Favorites are persisted using:
 favorites.json
 ```
 
+### 🔁 Recommendation History
+
+Recommendation history is persisted using:
+
+```text
+recommendation_history.json
+```
+
+This helps prevent the same movies from being repeatedly shown after application refreshes or restarts, subject to the available candidate pool.
+
 ---
 
 ## 🧠 Recommendation Methodology
 
-### Current User-Facing Recommendation Logic
+The visible recommendation flow is **genre-guided**, but the actual ranking is performed by the locally trained CineAI model rather than by a simple API recommendation endpoint.
 
-The final visible recommendation flow is **category/genre based**.
+### Model Pipeline
 
-For a selected category:
-
-1. The application checks the movie's genre list.
-2. Matching movies are collected.
-3. The first five matching records are displayed.
-4. TMDB is used to enrich those records with poster, rating, overview, trailer, and provider information.
-
-The core filtering concept is:
-
-```python
-matching_movies = movies[
-    movies["genres"].apply(
-        lambda genre_list: selected_genre in genre_list
-    )
-]
-
-recommended_movies = matching_movies.head(5)
+```text
+Movie Text / Metadata
+        ↓
+TF-IDF Representation
+        ↓
+TruncatedSVD
+        ↓
+256-D Latent Representation
+        ↓
+Cosine Similarity / Semantic Retrieval
+        ↓
+Quality + Specificity Signals
+        ↓
+Final Ranking
+        ↓
+Diversity-aware Selection
+        ↓
+Top 5 Recommendations
 ```
 
-### Retained Content-Similarity Pipeline
+### Current Model Configuration
 
-The codebase also retains a content-representation pipeline built with:
+| Parameter | Value |
+|---|---:|
+| Movies indexed | 4,803 |
+| TF-IDF features | 35,000 |
+| SVD latent dimensions | 256 |
+| Model version | 2 |
+| Semantic weight | 75% |
+| Quality weight | 20% |
+| Specificity weight | 5% |
 
-- Movie overview
-- Genres
-- Keywords
-- Top cast
-- CountVectorizer
-- Cosine similarity
+The trained model and metadata are stored in:
 
-This pipeline is retained as a foundation for future hybrid or similarity-based recommendation modes.
+```text
+models/cineai_model.joblib
+models/cineai_model.json
+```
 
-**Important:** the current visible recommendation interface uses direct genre/category filtering rather than a learned relevance ranking.
+### Important Role of TMDB
+
+TMDB is **not the core recommendation engine**.
+
+TMDB is used after recommendation generation to fetch supplementary information such as:
+
+- Posters
+- Ratings
+- Overview/details
+- Trailers/videos
+- India-region watch providers
+
+This means the recommendation logic remains based on the project's own trained CineAI model, while TMDB provides live movie information and media enrichment.
 
 ---
 
@@ -170,12 +221,13 @@ This pipeline is retained as a foundation for future hybrid or similarity-based 
 
 | Technology | Purpose |
 |---|---|
-| **Python** | Core application and data-processing language |
+| **Python** | Core application, model, and data-processing language |
 | **Streamlit** | Interactive web application and multipage UI |
-| **Pandas** | Loading, merging, filtering, and transforming movie data |
-| **scikit-learn** | CountVectorizer and cosine-similarity components |
+| **Pandas** | Loading, filtering, and transforming movie data |
+| **scikit-learn** | TF-IDF, TruncatedSVD, cosine similarity, and ML utilities |
 | **Requests** | HTTP communication with TMDB |
-| **TMDB API** | Posters, ratings, overviews, videos, and watch-provider data |
+| **Joblib** | Saving and loading the trained recommendation model |
+| **TMDB API** | Posters, ratings, movie details, videos, and watch-provider data |
 | **Git / GitHub** | Version control and source repository |
 | **Streamlit Community Cloud** | Cloud deployment |
 
@@ -186,12 +238,10 @@ This pipeline is retained as a foundation for future hybrid or similarity-based 
 ```text
 Movie-Recommendation-System/
 │
-├── .streamlit/
-│   └── secrets.toml
-│
 ├── app/
 │   ├── app.py
-│   ├── app_backup.py
+│   ├── cineai_model.py
+│   ├── train_cineai_model.py
 │   └── pages/
 │       └── movie_details.py
 │
@@ -199,9 +249,17 @@ Movie-Recommendation-System/
 │   ├── movies.csv
 │   └── credits.csv
 │
+├── models/
+│   ├── cineai_model.joblib
+│   └── cineai_model.json
+│
+├── app/pages/
+│   └── movie_details.py
+│
+├── evaluate_cineai_model.py
+├── compare_v1_v2.py
 ├── favorites.json
-├── movies.pkl
-├── similarity.pkl
+├── recommendation_history.json
 ├── requirements.txt
 ├── README.md
 └── .gitignore
@@ -212,13 +270,17 @@ Movie-Recommendation-System/
 | File | Purpose |
 |---|---|
 | `app/app.py` | Main Streamlit application |
+| `app/cineai_model.py` | CineAI recommendation model implementation |
+| `app/train_cineai_model.py` | Training script for the local recommendation model |
 | `app/pages/movie_details.py` | Dedicated movie details page |
-| `data/movies.csv` | Movie metadata |
+| `models/cineai_model.joblib` | Trained recommendation model |
+| `models/cineai_model.json` | Model metadata/configuration |
+| `data/movies.csv` | Movie metadata used by the project |
 | `data/credits.csv` | Cast/credits data |
+| `evaluate_cineai_model.py` | Model response/evaluation checks |
+| `compare_v1_v2.py` | Comparison of recommendation scoring configurations |
 | `favorites.json` | Persistent favorites |
-| `movies.pkl` | Generated movie data/model artifact |
-| `similarity.pkl` | Generated similarity matrix |
-| `.streamlit/secrets.toml` | Local Streamlit secrets |
+| `recommendation_history.json` | Persistent recommendation history |
 | `requirements.txt` | Python dependencies |
 
 ---
@@ -234,14 +296,14 @@ cd AI-Movie-Recommendation-System
 
 ### 2. Create and activate a virtual environment
 
-macOS / Linux:
+**macOS / Linux:**
 
 ```bash
 python -m venv venv
 source venv/bin/activate
 ```
 
-Windows:
+**Windows:**
 
 ```bash
 python -m venv venv
@@ -276,7 +338,11 @@ Do not commit the secrets file to GitHub.
 streamlit run app/app.py
 ```
 
-The application will open in the browser at the local Streamlit URL.
+The application will open at the local Streamlit URL, normally:
+
+```text
+http://localhost:8501
+```
 
 ---
 
@@ -296,11 +362,11 @@ The repository should never contain the real API key.
 
 ## 🌐 TMDB API Integration
 
-TMDB is used to enrich the local dataset with live presentation and media information.
+TMDB is used to enrich the locally generated recommendations with live movie information.
 
 ### Poster
 
-Movie poster data is retrieved through the TMDB movie search endpoint.
+Movie poster data is retrieved from TMDB movie information.
 
 ### Rating
 
@@ -308,7 +374,7 @@ The TMDB `vote_average` value is used for the displayed movie rating.
 
 ### Overview
 
-Movie summaries are retrieved from TMDB search results.
+Movie summaries/details are retrieved from TMDB.
 
 ### Trailer
 
@@ -322,7 +388,7 @@ Movie watch-provider information is retrieved for the India region:
 IN
 ```
 
-Provider names are collected from streaming, free, ad-supported, rental, and purchase categories returned by TMDB.
+Provider names are collected from the provider categories returned by TMDB.
 
 ---
 
@@ -335,7 +401,7 @@ Implemented measures include:
 - HTTP session reuse
 - Retry handling for transient HTTP failures
 - Request timeouts
-- Streamlit caching for repeated TMDB calls
+- Streamlit caching for repeated API calls
 - Poster fallback handling
 - Graceful handling when trailers or providers are unavailable
 
@@ -372,11 +438,11 @@ Typical flow:
 ```text
 Add Favorite
     ↓
-Append Movie Title
+Save favorite data
     ↓
-Save favorites.json
+Write favorites.json
     ↓
-Movie remains in Favorites
+Favorite remains available after restart
 ```
 
 Removal follows the reverse process.
@@ -385,33 +451,41 @@ Removal follows the reverse process.
 
 ---
 
-## 🧪 Testing
+## 🔁 Recommendation History and Persistence
 
-The application was tested manually during development.
+Recommendation history is maintained in both the current Streamlit session and a local JSON file:
 
-| Test | Result |
-|---|---|
-| Python syntax check | ✅ Passed |
-| Category selection | ✅ Passed |
-| Five recommendations | ✅ Passed |
-| Poster display | ✅ Passed |
-| Rating display | ✅ Passed |
-| Movie title navigation | ✅ Passed |
-| Movie details page | ✅ Passed |
-| Trailer playback | ✅ Passed when suitable video is available |
-| India availability | ✅ Passed when provider data is returned |
-| Add Favorites | ✅ Passed |
-| Remove Favorites | ✅ Passed |
-| Favorites persistence | ✅ Passed in the local environment |
-| Streamlit deployment | ✅ Passed |
-
-Python syntax was checked using:
-
-```bash
-python -m py_compile app/app.py app/pages/movie_details.py
+```text
+recommendation_history.json
 ```
 
-No formal recommendation accuracy metric is reported because the current user-facing recommendation mode is a simple category filter and there is no labelled ground-truth set for accuracy evaluation.
+The history is used to exclude previously recommended movie IDs where possible, reducing repetitive recommendation batches across refreshes and restarts.
+
+If the candidate pool becomes too small, the application can reuse a recent subset so that recommendations remain available.
+
+---
+
+## 🧪 Testing and Evaluation
+
+The application was tested during development for the main user flow, including recommendations, details, TMDB enrichment, and persistence.
+
+The CineAI model was also checked in a fresh Python process after training.
+
+### Model Evaluation Snapshot
+
+```text
+Movies indexed : 4,803
+TF-IDF features: 35,000
+Model load time: 0.2147 sec
+Genres tested  : 11
+Successful     : 11/11
+Movies returned: 55
+Average response: 0.0178 sec
+Fastest response: 0.0046 sec
+Slowest response: 0.0414 sec
+```
+
+There is currently **no labelled ground-truth recommendation dataset**, so formal accuracy, precision, recall, or F1 metrics are not reported for the recommendation task.
 
 ---
 
@@ -431,25 +505,25 @@ Streamlit Community Cloud
 Live Web Application
 ```
 
-Repository:
+### Repository
 
-```text
 https://github.com/singhsabb7143-create/AI-Movie-Recommendation-System
-```
 
-The final version was pushed to the `main` branch and verified on Streamlit Community Cloud.
+### Live Application
+
+https://singhsabb7143-create-ai-movie-recommendation-syst-appapp-egfyb0.streamlit.app
 
 ---
 
 ## ⚠️ Limitations
 
-- The current category recommender selects the first five matching dataset records rather than ranking the whole category with a learned relevance score.
-- Trailer availability depends on videos returned by TMDB.
+- Recommendation quality depends on the available movie metadata and trained representation.
+- TMDB trailer availability depends on the videos returned by the API.
 - Watch-provider availability is region-specific and can change over time.
 - The application does not currently implement user-profile personalization.
 - Collaborative filtering is not implemented.
-- Favorites use a local JSON file rather than a production database.
-- The category list is manually defined in the UI.
+- Favorites and recommendation history use local JSON persistence rather than a production database.
+- The category list is currently defined in the application UI.
 - A direct full-movie deep link is not guaranteed for every provider/movie.
 
 ---
@@ -503,7 +577,10 @@ Possible future improvements include:
 This project demonstrates practical integration of:
 
 - Data preparation
-- Genre-based recommendation logic
+- Machine-learning based movie recommendation
+- TF-IDF text representation
+- TruncatedSVD dimensionality reduction
+- Cosine-similarity retrieval
 - Movie metadata handling
 - External API integration
 - Streamlit UI development
